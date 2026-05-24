@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>シャドウルートマップ</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body, html { height: 100%; width: 100%; overflow: hidden; font-family: 'Roboto', Arial, sans-serif; }
+  #map { width: 100%; height: 100vh; }
+
+  /* ===== Google Maps風 検索バー ===== */
+  #searchBar {
+    position: absolute; top: 10px; left: 10px; right: 60px; z-index: 20;
+    display: flex; align-items: center; gap: 0;
+    background: #fff; border-radius: 8px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    max-width: 420px; height: 48px;
+    overflow: hidden;
+  }
+  #searchBar input {
+    flex: 1; border: none; outline: none; font-size: 15px;
+    padding: 0 12px; height: 100%; background: transparent;
+  }
+  #searchBar input::placeholder { color: #999; }
+  #searchBtn {
+    width: 48px; height: 48px; border: none; background: #1a73e8; color: #fff;
+    cursor: pointer; font-size: 18px; display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  #searchBtn:hover { background: #1557b0; }
+
+  /* ===== 展開パネル (More) ===== */
+  #detailPanel {
+    position: absolute; top: 68px; left: 10px; z-index: 15;
+    background: #fff; border-radius: 12px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.25);
+    max-width: 420px; width: calc(100% - 80px);
+    font-size: 13px; overflow: hidden;
+    transition: transform 0.3s ease, opacity 0.3s ease;
+  }
+  #detailPanel.hidden {
+    transform: translateY(-10px); opacity: 0; pointer-events: none;
+  }
+  .panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; background: #f8f9fa; border-bottom: 1px solid #e0e0e0;
+    cursor: pointer; user-select: none;
+  }
+  .panel-header h3 { font-size: 14px; font-weight: 600; }
+  .panel-header .close-btn {
+    width: 28px; height: 28px; border: none; background: none;
+    font-size: 18px; cursor: pointer; color: #666; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .panel-header .close-btn:hover { background: #e0e0e0; }
+  .panel-body { padding: 12px 14px; }
+  .panel-body label { display: block; margin: 6px 0 2px; font-weight: 600; font-size: 12px; color: #555; }
+  .panel-body input[type=range] { width: 100%; accent-color: #1a73e8; }
+  .panel-body input[type=date] { width: 100%; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
+  .panel-body .cb-row { display: flex; align-items: center; gap: 6px; margin: 6px 0; font-size: 12px; }
+
+  /* ===== More/Less ボタン ===== */
+  #moreBtn {
+    position: absolute; top: 68px; left: 10px; z-index: 14;
+    background: #fff; border: none; border-radius: 20px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.2); padding: 6px 16px;
+    font-size: 13px; cursor: pointer; color: #1a73e8; font-weight: 600;
+    transition: opacity 0.2s;
+  }
+  #moreBtn:hover { background: #f0f4ff; }
+  #moreBtn.hidden { opacity: 0; pointer-events: none; }
+
+  /* ===== 日陰バー ===== */
+  #shadeInfo {
+    position: absolute; bottom: 30px; left: 10px; right: 10px; z-index: 15;
+    background: #fff; border-radius: 12px; padding: 10px 16px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    display: none; max-width: 420px;
+  }
+  #shadeInfo .route-info { font-size: 13px; color: #333; margin-bottom: 6px; }
+  #shadeBar {
+    width: 100%; height: 18px; background: #f0f0f0; border-radius: 9px; overflow: hidden;
+    position: relative;
+  }
+  #shadeBarFill {
+    height: 100%; background: linear-gradient(90deg, #1a73e8, #4fc3f7);
+    border-radius: 9px; transition: width 0.5s ease;
+  }
+  #shadePercent { font-size: 14px; font-weight: 700; margin-top: 4px; color: #1a73e8; }
+
+  /* ===== 現在地ボタン ===== */
+  #locateBtn {
+    position: absolute; bottom: 120px; right: 10px; z-index: 15;
+    width: 44px; height: 44px; border-radius: 50%; border: none;
+    background: #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    cursor: pointer; font-size: 20px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #locateBtn:hover { background: #f5f5f5; }
+
+  /* ===== ズーム警告 ===== */
+  #zoomWarning {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    z-index: 20; background: rgba(0,0,0,0.7); color: #fff;
+    padding: 10px 20px; border-radius: 8px; font-size: 13px;
+    pointer-events: none; opacity: 0; transition: opacity 0.3s;
+  }
+  #zoomWarning.show { opacity: 1; }
+
+  #status {
+    position: absolute; bottom: 10px; right: 10px; z-index: 10;
+    background: rgba(255,255,255,0.9); padding: 4px 10px; border-radius: 6px;
+    font-size: 11px; color: #888; box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<!-- 検索バー (常時表示) -->
+<div id="searchBar">
+  <input type="text" id="destInput" placeholder="目的地を検索..." autocomplete="off">
+  <button id="searchBtn">🔍</button>
+</div>
+
+<!-- Moreボタン -->
+<button id="moreBtn">⚙️ 設定・詳細</button>
+
+<!-- 詳細パネル (折りたたみ) -->
+<div id="detailPanel" class="hidden">
+  <div class="panel-header">
+    <h3>☀️ シャドウマップ設定</h3>
+    <button class="close-btn" id="panelCloseBtn">✕</button>
+  </div>
+  <div class="panel-body">
+    <label>時刻: <span id="timeLabel">--</span></label>
+    <input type="range" id="timeSlider" min="0" max="1440" step="5" value="720">
+    <label>日付: <span id="dateLabel">--</span></label>
+    <input type="date" id="datePicker">
+    <div class="cb-row">
+      <input type="checkbox" id="autoUpdate" checked>
+      <label for="autoUpdate" style="margin:0;font-weight:normal;">現在時刻で自動更新(5分毎)</label>
+    </div>
+    <label>建物取得範囲: <span id="radiusLabel">50</span>m</label>
+    <input type="range" id="radiusSlider" min="20" max="300" step="10" value="50">
+    <div style="margin-top:8px;padding:8px;background:#f0f4ff;border-radius:6px;font-size:11px;color:#555;">
+      <strong>影表示条件:</strong> ズームレベル16以上で影を表示します。<br>
+      縮小しすぎると自動的に非表示になります。
+    </div>
+  </div>
+</div>
+
+<!-- 日陰率バー -->
+<div id="shadeInfo">
+  <div class="route-info" id="routeInfoText">--</div>
+  <div id="shadeBar"><div id="shadeBarFill" style="width:0%"></div></div>
+  <div id="shadePercent">日陰率: --%</div>
+</div>
+
+<!-- 現在地ボタン -->
+<button id="locateBtn" title="現在地に移動">📍</button>
+
+<!-- ズーム警告 -->
+<div id="zoomWarning">🔍 もう少しズームインすると影が表示されます</div>
+
+<!-- ステータス -->
+<div id="status">読み込み中...</div>
+
+<!-- SunCalc -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/suncalc/1.9.0/suncalc.min.js"></script>
+
+<!-- Firebase (初期設定データ保存) -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-app.js";
+  import { getFirestore, doc, setDoc, getDoc, serverTimestamp }
+    from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyDZ0sUvbKwI0UOJlcYWzxHvXGGYrbTniwo",
+    authDomain: "kagepuro-7aaef.firebaseapp.com",
+    projectId: "kagepuro-7aaef",
+    storageBucket: "kagepuro-7aaef.firebasestorage.app",
+    messagingSenderId: "987076087770",
+    appId: "1:987076087770:web:403d42470a49b17a337ae3",
+    measurementId: "G-BN2G82TZ6P"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  // デバイス毎の一意ID（localStorage に保持）
+  let deviceId = localStorage.getItem('kagepuro_device_id');
+  if (!deviceId) {
+    deviceId = 'dev_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    localStorage.setItem('kagepuro_device_id', deviceId);
+  }
+
+  window.firebaseSaveSettings = async (data) => {
+    try {
+      await setDoc(doc(db, 'user_settings', deviceId), {
+        ...data,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      console.log('[Firebase] 設定を保存しました', data);
+    } catch (e) {
+      console.warn('[Firebase] 保存失敗:', e);
+    }
+  };
+
+  window.firebaseLoadSettings = async () => {
+    try {
+      const snap = await getDoc(doc(db, 'user_settings', deviceId));
+      if (snap.exists()) {
+        console.log('[Firebase] 設定を読み込み', snap.data());
+        return snap.data();
+      }
+    } catch (e) {
+      console.warn('[Firebase] 読み込み失敗:', e);
+    }
+    return null;
+  };
+
+  // 読み込み完了を通知
+  window.dispatchEvent(new Event('firebase-ready'));
+</script>
+
+
+<script>
+const GOOGLE_MAPS_API_KEY = 'AIzaSyAP3o8p635w7RKoSRJfgmCOT2KVECcRDL8';
+const MIN_ZOOM_FOR_SHADOWS = 16; // このズーム以上で影を表示
+const ROUTE_SAMPLE_INTERVAL = 5; // ルート上のサンプル間隔(m)
+
+let map, directionsService, directionsRenderer, autocomplete;
+let userMarker, shadowPolygons = [], buildingPolygons = [], routeMarkers = [];
+let userLat = 35.6812, userLng = 139.7671;
+let radiusM = 50;
+let autoUpdateInterval = null;
+let cachedBuildings = null;
+let currentRoute = null;
+
+// ===== Google Maps ロード =====
+function loadGoogleMaps() {
+  const s = document.createElement('script');
+  s.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places&callback=initMap`;
+  s.async = true; s.defer = true;
+  document.head.appendChild(s);
+}
+
+function initMap() {
+  directionsService = new google.maps.DirectionsService();
+  directionsRenderer = new google.maps.DirectionsRenderer({
+    polylineOptions: { strokeColor: '#1a73e8', strokeWeight: 5, strokeOpacity: 0.7 },
+    suppressMarkers: false
+  });
+
+  map = new google.maps.Map(document.getElementById('map'), {
+    center: { lat: userLat, lng: userLng },
+    zoom: 17,
+    mapTypeId: 'roadmap',
+    tilt: 0,
+    gestureHandling: 'greedy',
+    styles: [
+      { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+      { featureType: 'transit', stylers: [{ visibility: 'simplified' }] }
+    ]
+  });
+
+  directionsRenderer.setMap(map);
+
+  // Places Autocomplete
+  const input = document.getElementById('destInput');
+  autocomplete = new google.maps.places.Autocomplete(input, {
+    types: ['establishment', 'geocode'],
+    componentRestrictions: { country: 'jp' },
+    fields: ['place_id', 'geometry', 'name', 'formatted_address']
+  });
+  autocomplete.bindTo('bounds', map);
+  autocomplete.addListener('place_changed', () => {
+    const place = autocomplete.getPlace();
+    if (place && place.geometry) {
+      searchRoute(place.name || place.formatted_address);
+    }
+  });
+
+  // 現在地取得
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(pos => {
+      userLat = pos.coords.latitude;
+      userLng = pos.coords.longitude;
+      map.setCenter({ lat: userLat, lng: userLng });
+      placeUserMarker();
+      fetchAndCache();
+      setStatus('現在地を取得しました');
+    }, () => {
+      placeUserMarker();
+      fetchAndCache();
+      setStatus('デフォルト位置（東京駅）を使用');
+    }, { enableHighAccuracy: true });
+  }
+
+  // ズーム変更監視
+  map.addListener('zoom_changed', () => {
+    const zoom = map.getZoom();
+    const warn = document.getElementById('zoomWarning');
+    if (zoom < MIN_ZOOM_FOR_SHADOWS) {
+      clearShadows();
+      warn.classList.add('show');
+      setTimeout(() => warn.classList.remove('show'), 2000);
+    } else {
+      warn.classList.remove('show');
+      if (cachedBuildings) renderShadows(cachedBuildings);
+    }
+  });
+
+  // マップ移動後に建物再取得
+  map.addListener('idle', () => {
+    const center = map.getCenter();
+    const dist = haversine(userLat, userLng, center.lat(), center.lng());
+    // 中心が大きく動いたら再取得
+    if (dist > radiusM * 0.5) {
+      userLat = center.lat();
+      userLng = center.lng();
+    }
+  });
+
+  setupControls();
+  startAutoUpdate();
+}
+
+// ===== ユーザーマーカー =====
+function placeUserMarker() {
+  if (userMarker) userMarker.setMap(null);
+  userMarker = new google.maps.Marker({
+    position: { lat: userLat, lng: userLng }, map,
+    icon: {
+      path: google.maps.SymbolPath.CIRCLE, scale: 8,
+      fillColor: '#4285F4', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2
+    },
+    title: '現在地'
+  });
+}
+
+// ===== Overpass API =====
+const OVERPASS_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.openstreetmap.ru/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter'
+];
+
+async function overpassFetch(query) {
+  let lastErr = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    for (const url of OVERPASS_ENDPOINTS) {
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'data=' + encodeURIComponent(query)
+        });
+        const text = await res.text();
+        // XMLエラー応答や空応答を検出
+        const trimmed = text.trim();
+        if (!trimmed || trimmed.startsWith('<')) {
+          lastErr = new Error(`Overpass ${res.status} (XML/empty) from ${url}`);
+          continue;
+        }
+        if (!res.ok) {
+          lastErr = new Error(`Overpass HTTP ${res.status} from ${url}`);
+          continue;
+        }
+        try {
+          return JSON.parse(text);
+        } catch (e) {
+          lastErr = new Error(`Overpass JSON parse error from ${url}`);
+          continue;
+        }
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    // 全ミラー失敗、少し待ってリトライ
+    if (attempt === 0) await new Promise(r => setTimeout(r, 1500));
+  }
+  throw lastErr || new Error('Overpass全ミラーへの接続に失敗しました');
+}
+
+function parseBuildings(data) {
+  const nodes = {};
+  data.elements.filter(e => e.type === 'node').forEach(n => { nodes[n.id] = { lat: n.lat, lng: n.lon }; });
+  return data.elements.filter(e => e.type === 'way' && e.tags && e.tags.building).map(way => {
+    const coords = way.nodes.map(nid => nodes[nid]).filter(Boolean);
+    if (coords.length < 3) return null;
+    let height = 10;
+    if (way.tags.height) height = parseFloat(way.tags.height) || 10;
+    else if (way.tags['building:levels']) height = (parseInt(way.tags['building:levels']) || 3) * 3;
+    return { coords, height, name: way.tags.name || '' };
+  }).filter(Boolean);
+}
+
+async function fetchBuildings(lat, lng, radius) {
+  const query = `[out:json][timeout:25];(way["building"](around:${radius},${lat},${lng}););out body;>;out skel qt;`;
+  const data = await overpassFetch(query);
+  return parseBuildings(data);
+}
+
+// ===== ルート沿いの建物取得 =====
+async function fetchBuildingsAlongRoute(route) {
+  const path = route.overview_path;
+  let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+  path.forEach(p => {
+    const lat = p.lat(), lng = p.lng();
+    if (lat < minLat) minLat = lat;
+    if (lat > maxLat) maxLat = lat;
+    if (lng < minLng) minLng = lng;
+    if (lng > maxLng) maxLng = lng;
+  });
+  const pad = 0.0005;
+  minLat -= pad; maxLat += pad; minLng -= pad; maxLng += pad;
+
+  const query = `[out:json][timeout:30];(way["building"](${minLat},${minLng},${maxLat},${maxLng}););out body;>;out skel qt;`;
+  const data = await overpassFetch(query);
+  return parseBuildings(data);
+}
+
+// ===== 影計算 (夜間=全影) =====
+function computeShadows(buildings, date, lat, lng) {
+  const sunPos = SunCalc.getPosition(date, lat, lng);
+  const altitude = sunPos.altitude;
+  const azimuth = sunPos.azimuth;
+
+  // 太陽が地平線以下→影なし(夜間は別途日陰率100%で処理)
+  if (altitude <= 0) return { shadows: [], isNight: true };
+
+  const shadowDir = azimuth + Math.PI;
+  const shadowMultiplier = 1 / Math.tan(altitude);
+
+  const shadows = [];
+  buildings.forEach(b => {
+    const shadowLength = b.height * shadowMultiplier;
+    const dLat = (shadowLength * Math.cos(shadowDir)) / 111320;
+    const dLng = (shadowLength * Math.sin(shadowDir)) / (111320 * Math.cos(lat * Math.PI / 180));
+
+    const shadowCoords = [];
+    for (let i = b.coords.length - 1; i >= 0; i--) shadowCoords.push(b.coords[i]);
+    for (let i = 0; i < b.coords.length; i++) {
+      shadowCoords.push({ lat: b.coords[i].lat + dLat, lng: b.coords[i].lng + dLng });
+    }
+    shadows.push({ coords: shadowCoords, height: b.height });
+  });
+
+  return { shadows, isNight: false };
+}
+
+// ===== 描画 =====
+function clearShadows() {
+  shadowPolygons.forEach(p => p.setMap(null)); shadowPolygons = [];
+  buildingPolygons.forEach(p => p.setMap(null)); buildingPolygons = [];
+}
+function clearRouteMarkers() {
+  routeMarkers.forEach(m => m.setMap(null)); routeMarkers = [];
+}
+
+function renderShadows(buildings) {
+  clearShadows();
+  if (!buildings || map.getZoom() < MIN_ZOOM_FOR_SHADOWS) return;
+
+  const date = getSelectedDate();
+  const { shadows, isNight } = computeShadows(buildings, date, userLat, userLng);
+
+  // 建物描画
+  buildings.forEach(b => {
+    const poly = new google.maps.Polygon({
+      paths: b.coords.map(c => ({ lat: c.lat, lng: c.lng })),
+      fillColor: '#555', fillOpacity: 0.6,
+      strokeColor: '#333', strokeWeight: 1, map, zIndex: 2
+    });
+    buildingPolygons.push(poly);
+  });
+
+  // 影描画 (夜間は影ポリゴンなし、日陰率だけ100%にする)
+  if (!isNight) {
+    shadows.forEach(s => {
+      const poly = new google.maps.Polygon({
+        paths: s.coords.map(c => ({ lat: c.lat, lng: c.lng })),
+        fillColor: '#1a1a2e', fillOpacity: 0.35,
+        strokeColor: '#1a1a2e', strokeWeight: 0, map, zIndex: 1
+      });
+      shadowPolygons.push(poly);
+    });
+  }
+
+  // ルートがあれば日陰率を再計算
+  if (currentRoute) {
+    calculateShadePercentage(currentRoute, buildings, isNight);
+  }
+}
+
+// ===== 日陰率計算 =====
+function calculateShadePercentage(route, buildings, isNight) {
+  clearRouteMarkers();
+  const date = getSelectedDate();
+
+  // 夜間は100%
+  if (isNight) {
+    updateShadeDisplay(100, route);
+    return;
+  }
+
+  // 日の出・日の入りチェック
+  const times = SunCalc.getTimes(date, userLat, userLng);
+  if (date < times.sunrise || date > times.sunset) {
+    updateShadeDisplay(100, route);
+    return;
+  }
+
+  const { shadows } = computeShadows(buildings || [], date, userLat, userLng);
+  const points = sampleRoutePoints(route, ROUTE_SAMPLE_INTERVAL);
+  if (points.length === 0) { updateShadeDisplay(0, route); return; }
+
+  let shadeCount = 0;
+  points.forEach(p => {
+    const inShade = shadows.some(s => pointInPolygon(p, s.coords));
+    if (inShade) shadeCount++;
+  });
+
+  const pct = Math.round((shadeCount / points.length) * 100);
+  updateShadeDisplay(pct, route);
+}
+
+function updateShadeDisplay(pct, route) {
+  const leg = route.routes[0].legs[0];
+  document.getElementById('shadeInfo').style.display = 'block';
+  document.getElementById('routeInfoText').textContent =
+    `${leg.start_address.split(',')[0]} → ${leg.end_address.split(',')[0]}　|　${leg.distance.text}　|　${leg.duration.text}`;
+  document.getElementById('shadeBarFill').style.width = pct + '%';
+  document.getElementById('shadePercent').textContent = `日陰率: ${pct}%`;
+
+  // Thunkable連携
+  if (window.ReactNativeWebView) {
+    window.ReactNativeWebView.postMessage(`${leg.distance.text},${leg.duration.text},${pct}%`);
+  }
+}
+
+function sampleRoutePoints(route, intervalM) {
+  const points = [];
+  const path = route.routes[0].overview_path;
+  let carry = 0;
+  for (let i = 1; i < path.length; i++) {
+    const p1 = path[i - 1], p2 = path[i];
+    const segLen = haversine(p1.lat(), p1.lng(), p2.lat(), p2.lng());
+    let d = carry > 0 ? intervalM - carry : 0;
+    while (d <= segLen) {
+      const t = d / segLen;
+      points.push({
+        lat: p1.lat() + (p2.lat() - p1.lat()) * t,
+        lng: p1.lng() + (p2.lng() - p1.lng()) * t
+      });
+      d += intervalM;
+    }
+    carry = segLen - (d - intervalM);
+  }
+  return points;
+}
+
+function pointInPolygon(point, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].lat, yi = polygon[i].lng;
+    const xj = polygon[j].lat, yj = polygon[j].lng;
+    if ((yi > point.lng) !== (yj > point.lng) &&
+        point.lat < (xj - xi) * (point.lng - yi) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function haversine(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// ===== ルート検索 =====
+function searchRoute(destination) {
+  if (!destination || !destination.trim()) return;
+  setStatus('ルートを検索中...');
+
+  const doSearch = (origin) => {
+    directionsService.route({
+      origin: origin,
+      destination: destination,
+      travelMode: google.maps.TravelMode.WALKING,
+      region: 'jp'
+    }, async (response, status) => {
+      if (status === 'OK') {
+        directionsRenderer.setDirections(response);
+        currentRoute = response;
+        setStatus('ルート沿いの建物を取得中...');
+        try {
+          const buildings = await fetchBuildingsAlongRoute(response);
+          cachedBuildings = buildings;
+          setStatus(`${buildings.length}棟の建物を取得`);
+          renderShadows(buildings);
+        } catch (e) {
+          setStatus('建物データ取得エラー: ' + e.message);
+        }
+      } else {
+        // フォールバック: テキスト検索で再試行
+        const placesService = new google.maps.places.PlacesService(map);
+        placesService.textSearch({ query: destination }, (results, pStatus) => {
+          if (pStatus === google.maps.places.PlacesServiceStatus.OK && results.length > 0) {
+            const loc = results[0].geometry.location;
+            directionsService.route({
+              origin: origin,
+              destination: loc,
+              travelMode: google.maps.TravelMode.WALKING,
+              region: 'jp'
+            }, async (resp2, stat2) => {
+              if (stat2 === 'OK') {
+                directionsRenderer.setDirections(resp2);
+                currentRoute = resp2;
+                try {
+                  const buildings = await fetchBuildingsAlongRoute(resp2);
+                  cachedBuildings = buildings;
+                  setStatus(`${buildings.length}棟の建物を取得`);
+                  renderShadows(buildings);
+                } catch (e) {
+                  setStatus('建物データ取得エラー');
+                }
+              } else {
+                setStatus('ルートが見つかりませんでした');
+                alert('ルートが見つかりませんでした。\n別の表現で目的地を入力してみてください。');
+              }
+            });
+          } else {
+            setStatus('目的地が見つかりませんでした');
+            alert('目的地が見つかりませんでした。\n別の表現で検索してみてください。');
+          }
+        });
+      }
+    });
+  };
+
+  // 現在地から検索
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(pos => {
+      userLat = pos.coords.latitude;
+      userLng = pos.coords.longitude;
+      doSearch({ lat: userLat, lng: userLng });
+    }, () => {
+      doSearch({ lat: userLat, lng: userLng });
+    }, { enableHighAccuracy: true });
+  } else {
+    doSearch({ lat: userLat, lng: userLng });
+  }
+}
+
+// ===== Thunkable連携 =====
+window.onmessage = function(event) {
+  const dest = event.data;
+  if (dest && typeof dest === 'string' && dest.trim()) {
+    document.getElementById('destInput').value = dest;
+    searchRoute(dest);
+  }
+};
+
+// ===== 建物キャッシュ & 描画 =====
+async function fetchAndCache() {
+  setStatus('建物データを取得中...');
+  try {
+    cachedBuildings = await fetchBuildings(userLat, userLng, radiusM);
+    setStatus(`${cachedBuildings.length}棟の建物を取得`);
+    renderShadows(cachedBuildings);
+  } catch (e) {
+    setStatus('データ取得エラー: ' + e.message);
+  }
+}
+
+// ===== 時刻 =====
+function getSelectedDate() {
+  if (document.getElementById('autoUpdate').checked) return new Date();
+  const dateStr = document.getElementById('datePicker').value;
+  const minutes = parseInt(document.getElementById('timeSlider').value);
+  const d = dateStr ? new Date(dateStr) : new Date();
+  d.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+  return d;
+}
+
+function updateTimeLabel() {
+  let date;
+  if (document.getElementById('autoUpdate').checked) {
+    date = new Date();
+    document.getElementById('timeSlider').value = date.getHours() * 60 + date.getMinutes();
+  } else {
+    date = getSelectedDate();
+  }
+  document.getElementById('timeLabel').textContent =
+    String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0');
+  document.getElementById('dateLabel').textContent = date.toLocaleDateString('ja-JP');
+
+  // 日の出・日の入り表示
+  const times = SunCalc.getTimes(date, userLat, userLng);
+  const fmt = d => String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+  const sunInfo = `🌅${fmt(times.sunrise)} 🌇${fmt(times.sunset)}`;
+  const existing = document.getElementById('sunInfo');
+  if (existing) existing.textContent = sunInfo;
+}
+
+function setStatus(msg) { document.getElementById('status').textContent = msg; }
+
+// ===== コントロール =====
+function setupControls() {
+  const datePicker = document.getElementById('datePicker');
+  datePicker.value = new Date().toISOString().split('T')[0];
+  const timeSlider = document.getElementById('timeSlider');
+  const now = new Date();
+  timeSlider.value = now.getHours() * 60 + now.getMinutes();
+  updateTimeLabel();
+
+  timeSlider.addEventListener('input', () => {
+    document.getElementById('autoUpdate').checked = false;
+    updateTimeLabel();
+    if (cachedBuildings) renderShadows(cachedBuildings);
+  });
+  datePicker.addEventListener('change', () => {
+    document.getElementById('autoUpdate').checked = false;
+    updateTimeLabel();
+    if (cachedBuildings) renderShadows(cachedBuildings);
+  });
+  document.getElementById('autoUpdate').addEventListener('change', e => {
+    if (e.target.checked) { updateTimeLabel(); if (cachedBuildings) renderShadows(cachedBuildings); startAutoUpdate(); }
+    else stopAutoUpdate();
+  });
+  document.getElementById('radiusSlider').addEventListener('input', e => {
+    radiusM = parseInt(e.target.value);
+    document.getElementById('radiusLabel').textContent = radiusM;
+  });
+  document.getElementById('radiusSlider').addEventListener('change', fetchAndCache);
+
+  // 検索
+  document.getElementById('searchBtn').addEventListener('click', () => {
+    searchRoute(document.getElementById('destInput').value);
+  });
+  document.getElementById('destInput').addEventListener('keypress', e => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      searchRoute(document.getElementById('destInput').value);
+    }
+  });
+
+  // More/Lessトグル
+  const moreBtn = document.getElementById('moreBtn');
+  const detailPanel = document.getElementById('detailPanel');
+  const panelCloseBtn = document.getElementById('panelCloseBtn');
+
+  moreBtn.addEventListener('click', () => {
+    detailPanel.classList.remove('hidden');
+    moreBtn.classList.add('hidden');
+  });
+  panelCloseBtn.addEventListener('click', () => {
+    detailPanel.classList.add('hidden');
+    moreBtn.classList.remove('hidden');
+  });
+
+  // 現在地ボタン
+  document.getElementById('locateBtn').addEventListener('click', () => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(pos => {
+        userLat = pos.coords.latitude;
+        userLng = pos.coords.longitude;
+        map.setCenter({ lat: userLat, lng: userLng });
+        map.setZoom(17);
+        placeUserMarker();
+        fetchAndCache();
+      });
+    }
+  });
+
+  // パネルに日の出日の入り情報を追加
+  const sunInfoEl = document.createElement('div');
+  sunInfoEl.id = 'sunInfo';
+  sunInfoEl.style.cssText = 'margin-top:6px;font-size:12px;color:#1a73e8;font-weight:600;';
+  document.querySelector('.panel-body').appendChild(sunInfoEl);
+  updateTimeLabel();
+
+  // ===== Firebase: 設定の保存・読み込み =====
+
+
+  function collectSettings() {
+    return {
+      time: parseInt(document.getElementById('timeSlider').value),
+      date: document.getElementById('datePicker').value,
+      autoUpdate: document.getElementById('autoUpdate').checked,
+      radius: parseInt(document.getElementById('radiusSlider').value)
+    };
+  }
+  let _saveTimer = null;
+  function scheduleSave() {
+    if (!window.firebaseSaveSettings) return;
+    clearTimeout(_saveTimer);
+    _saveTimer = setTimeout(() => window.firebaseSaveSettings(collectSettings()), 600);
+  }
+  ['timeSlider','datePicker','autoUpdate','radiusSlider'].forEach(id => {
+    document.getElementById(id).addEventListener('change', scheduleSave);
+  });
+  document.getElementById('timeSlider').addEventListener('input', scheduleSave);
+  document.getElementById('radiusSlider').addEventListener('input', scheduleSave);
+
+  const applySaved = (s) => {
+    if (!s) return;
+    if (typeof s.radius === 'number') {
+      document.getElementById('radiusSlider').value = s.radius;
+      document.getElementById('radiusLabel').textContent = s.radius;
+      radiusM = s.radius;
+    }
+    if (typeof s.autoUpdate === 'boolean') {
+      document.getElementById('autoUpdate').checked = s.autoUpdate;
+    }
+    if (s.autoUpdate === false) {
+      if (s.date) document.getElementById('datePicker').value = s.date;
+      if (typeof s.time === 'number') document.getElementById('timeSlider').value = s.time;
+    }
+    updateTimeLabel();
+    if (cachedBuildings) renderShadows(cachedBuildings);
+  };
+  if (window.firebaseLoadSettings) {
+    window.firebaseLoadSettings().then(applySaved);
+  } else {
+    window.addEventListener('firebase-ready', () => {
+      window.firebaseLoadSettings().then(applySaved);
+    }, { once: true });
+  }
+}
+
+
+function startAutoUpdate() {
+  stopAutoUpdate();
+  autoUpdateInterval = setInterval(() => {
+    if (document.getElementById('autoUpdate').checked) {
+      updateTimeLabel();
+      if (cachedBuildings) renderShadows(cachedBuildings);
+    }
+  }, 5 * 60 * 1000);
+}
+function stopAutoUpdate() {
+  if (autoUpdateInterval) { clearInterval(autoUpdateInterval); autoUpdateInterval = null; }
+}
+
+loadGoogleMaps();
+</script>
+</body>
+</html>
